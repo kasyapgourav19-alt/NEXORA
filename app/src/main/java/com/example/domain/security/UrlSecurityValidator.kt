@@ -42,16 +42,19 @@ object UrlSecurityValidator {
         ".home.arpa"
     )
 
+    private val URL_EXTRACTION_REGEX = Regex("""(https?://[^\s"'<>]+)""", RegexOption.IGNORE_CASE)
+
     private val secureRandom = SecureRandom()
 
     /**
      * Validates a user-submitted media URL against malformed syntax, non-HTTPS protocols,
      * and Server-Side Request Forgery (SSRF) targets including localhost, RFC1918 private IPs,
      * link-local addresses, and cloud metadata endpoints.
+     * Also smartly extracts URLs from social share text and auto-prefixes https:// when scheme is omitted.
      */
     fun validateMediaUrl(rawInput: String, allowNexoraSampleScheme: Boolean = true): UrlValidationResult {
-        val trimmed = rawInput.trim()
-        if (trimmed.isEmpty()) {
+        val initialTrim = rawInput.trim()
+        if (initialTrim.isEmpty()) {
             return UrlValidationResult.Invalid(
                 reasonTitle = "Empty Media Link",
                 explanation = "Please enter or paste an HTTPS media link to analyze.",
@@ -59,7 +62,17 @@ object UrlSecurityValidator {
             )
         }
 
-        if (trimmed.length > 2048) {
+        // Extract URL if user pasted multi-word share text (e.g., "Watch this video https://youtu.be/xyz")
+        val extracted = URL_EXTRACTION_REGEX.find(initialTrim)?.value ?: initialTrim
+
+        // Auto-prepend https:// if user typed a bare domain like "youtube.com/watch?v=..." or "instagram.com/reel/..."
+        val candidate = if (!extracted.contains("://") && extracted.contains('.') && !extracted.contains(' ')) {
+            "https://$extracted"
+        } else {
+            extracted
+        }
+
+        if (candidate.length > 2048) {
             return UrlValidationResult.Invalid(
                 reasonTitle = "URL Exceeds Maximum Length",
                 explanation = "The provided link exceeds the 2048-character security limit.",
@@ -67,8 +80,18 @@ object UrlSecurityValidator {
             )
         }
 
+        if (candidate.contains("..") || candidate.contains("\\")) {
+            return UrlValidationResult.Invalid(
+                reasonTitle = "Path Traversal Blocked",
+                explanation = "The URL path contains directory traversal sequences ('..' or '\\').",
+                suggestedAction = "Provide a clean canonical URL path."
+            )
+        }
+
+        val safeCandidate = candidate.replace(" ", "%20")
+
         val parsedUri = try {
-            URI(trimmed)
+            URI(safeCandidate)
         } catch (e: Exception) {
             return UrlValidationResult.Invalid(
                 reasonTitle = "Malformed URL Syntax",
@@ -152,7 +175,6 @@ object UrlSecurityValidator {
         if (cleanHost in BLOCKED_EXACT_HOSTS) return true
         if (BLOCKED_HOST_SUFFIXES.any { cleanHost.endsWith(it) }) return true
 
-        // IPv6 loopback / unique local / link-local checks
         if (cleanHost.contains(':')) {
             if (cleanHost == "::1" || cleanHost == "0:0:0:0:0:0:0:1") return true
             if (cleanHost.startsWith("fe80:") || cleanHost.startsWith("fc") || cleanHost.startsWith("fd")) {
@@ -160,26 +182,17 @@ object UrlSecurityValidator {
             }
         }
 
-        // IPv4 literal check
         val ipv4Parts = cleanHost.split('.')
         if (ipv4Parts.size == 4 && ipv4Parts.all { it.toIntOrNull() in 0..255 }) {
             val o1 = ipv4Parts[0].toInt()
             val o2 = ipv4Parts[1].toInt()
-            // 0.0.0.0/8
             if (o1 == 0) return true
-            // 10.0.0.0/8 (Private RFC 1918)
             if (o1 == 10) return true
-            // 100.64.0.0/10 (Carrier-grade NAT)
             if (o1 == 100 && o2 in 64..127) return true
-            // 127.0.0.0/8 (Loopback)
             if (o1 == 127) return true
-            // 169.254.0.0/16 (Link-local & Cloud Metadata 169.254.169.254)
             if (o1 == 169 && o2 == 254) return true
-            // 172.16.0.0/12 (Private RFC 1918)
             if (o1 == 172 && o2 in 16..31) return true
-            // 192.168.0.0/16 (Private RFC 1918)
             if (o1 == 192 && o2 == 168) return true
-            // 224.0.0.0/4+ (Multicast & Reserved)
             if (o1 >= 224) return true
         }
 

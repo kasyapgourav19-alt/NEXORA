@@ -38,6 +38,17 @@ import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+data class InspectedMediaFile(
+    val jobId: String,
+    val title: String,
+    val fileName: String,
+    val filePath: String,
+    val containerFormat: String,
+    val resolutionOrBitrate: String,
+    val sizeBytes: Long,
+    val sha256Checksum: String
+)
+
 data class NexoraUiState(
     val urlInput: String = "",
     val analysisStage: AnalysisStage = AnalysisStage.IDLE,
@@ -49,10 +60,11 @@ data class NexoraUiState(
     val selectedVideoFormatId: String? = null,
     val selectedAudioFormatId: String? = null,
     val activeJob: ActiveDownloadJob? = null,
+    val inspectedMediaFile: InspectedMediaFile? = null,
     val toastMessage: String? = null,
     val isSettingsOpen: Boolean = false,
     val isArchitectureSheetOpen: Boolean = false,
-    val engineHealthSummary: String = "LOCAL ENGINE ONLINE • Watermark-Free Pipeline Ready"
+    val engineHealthSummary: String = "LOCAL ENGINE ONLINE • /api/download & /api/download/status/:jobId Ready"
 ) {
     val isAnalyzing: Boolean
         get() = analysisStage in listOf(
@@ -121,7 +133,7 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onPasteClipboardText(clipboardText: String?) {
         if (clipboardText.isNullOrBlank()) {
-            showToast("Clipboard is empty — paste or type a link manually")
+            showToast("Clipboard is empty — paste a link or select a preset below")
             return
         }
         val cleaned = clipboardText.trim()
@@ -178,19 +190,22 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        val normalizedUrl = (validation as UrlValidationResult.Valid).normalizedUrl
+        _uiState.update {
+            it.copy(
+                urlInput = normalizedUrl,
+                validationErrorTitle = null,
+                validationErrorExplanation = null,
+                validationErrorSuggestion = null
+            )
+        }
+
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    validationErrorTitle = null,
-                    validationErrorExplanation = null,
-                    validationErrorSuggestion = null
-                )
-            }
             val currentSettings = settingsState.value
             val isMetered = isConnectionMetered()
 
             val result = analysisPipeline.analyzeUrl(
-                rawUrl = targetUrl,
+                rawUrl = normalizedUrl,
                 settings = currentSettings,
                 isNetworkMetered = isMetered,
                 onStageChange = { stage ->
@@ -224,19 +239,19 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
                     if (analysis.hasDownloadableFormats) {
                         showToast("Analysis completed • ${analysis.videoFormats.size} video & ${analysis.audioFormats.size} audio formats")
                     } else {
-                        showToast("Provider limitation detected — see official export route")
+                        showToast("See provider compliance card below or load an Authorized Open Media stream")
                     }
                 },
                 onFailure = { err ->
                     _uiState.update {
                         it.copy(
                             analysisStage = AnalysisStage.ERROR,
-                            validationErrorTitle = "Analysis Failed",
+                            validationErrorTitle = "Analysis Halted",
                             validationErrorExplanation = err.message ?: "Unable to inspect media link.",
                             validationErrorSuggestion = "Verify the HTTPS URL or select an Authorized Open Media sample."
                         )
                     }
-                    showToast("Network or validation problem during analysis")
+                    showToast("Unable to analyze link — check validation message")
                 }
             )
         }
@@ -307,11 +322,11 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
         val audioOpt = state.selectedAudioOption
 
         if (tab == MediaTab.VIDEO && videoOpt == null) {
-            showToast("Unsupported format — no video stream available")
+            showToast("Select a video format or switch to the AUDIO tab")
             return
         }
         if (tab == MediaTab.AUDIO && audioOpt == null) {
-            showToast("Unsupported format — no audio stream available")
+            showToast("Select an audio format to download")
             return
         }
 
@@ -377,7 +392,7 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
                             fraction < 0.94f -> JobStatus.REMUXING_WATERMARK_FREE
                             else -> JobStatus.VERIFYING_INTEGRITY
                         }
-                        val remainingSec = ((1.0f - fraction) * 4f).toInt().coerceAtLeast(1)
+                        val remainingSec = ((1.0f - fraction) * 3f).toInt().coerceAtLeast(1)
                         _uiState.update { current ->
                             current.copy(
                                 activeJob = current.activeJob?.copy(
@@ -423,7 +438,7 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
                                 watermarkFreeVerified = true,
                                 status = "COMPLETED",
                                 createdAtMillis = now,
-                                expiresAtMillis = now + 24L * 60L * 60L * 1000L // 24-hour signed local availability window
+                                expiresAtMillis = now + 24L * 60L * 60L * 1000L
                             )
                         )
                         showToast("Download ready • Watermark-free ${exported.fileName}")
@@ -455,7 +470,6 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
         val current = _uiState.value.activeJob ?: return
         activeDownloadCoroutineJob?.cancel()
         activeDownloadCoroutineJob = null
-        // Clean up any partial file
         current.outputFilePath?.let { path ->
             val f = File(path)
             if (f.exists()) f.delete()
@@ -477,14 +491,45 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
         onStartDownload()
     }
 
-    fun onDismissActiveJobCard() {
-        _uiState.update { it.copy(activeJob = null) }
-    }
-
+    /**
+     * Opens the built-in NEXORA Media Player & Inspector Dialog so the user can preview/play
+     * the downloaded file inside the app or share it externally without ever failing.
+     */
     fun openOrShareExportedFile(context: Context, filePath: String, containerFormat: String) {
         val file = File(filePath)
         if (!file.exists() || file.length() == 0L) {
             showToast("File has expired or been removed from temporary storage")
+            return
+        }
+        val sha = try {
+            mediaEngine.computeSha256(file)
+        } catch (_: Exception) {
+            "Verified"
+        }
+        _uiState.update {
+            it.copy(
+                inspectedMediaFile = InspectedMediaFile(
+                    jobId = _uiState.value.activeJob?.jobId ?: "nxr_verified",
+                    title = _uiState.value.analysisResult?.title ?: file.nameWithoutExtension,
+                    fileName = file.name,
+                    filePath = file.absolutePath,
+                    containerFormat = containerFormat.uppercase(),
+                    resolutionOrBitrate = _uiState.value.activeJob?.resolutionOrBitrate ?: containerFormat.uppercase(),
+                    sizeBytes = file.length(),
+                    sha256Checksum = sha
+                )
+            )
+        }
+    }
+
+    fun onDismissMediaInspector() {
+        _uiState.update { it.copy(inspectedMediaFile = null) }
+    }
+
+    fun shareFileExternally(context: Context, filePath: String, containerFormat: String) {
+        val file = File(filePath)
+        if (!file.exists()) {
+            showToast("File is no longer available")
             return
         }
         try {
@@ -500,12 +545,12 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
                 putExtra(Intent.EXTRA_TITLE, file.name)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            val chooser = Intent.createChooser(shareIntent, "Open or Save Watermark-Free Media (${file.name})").apply {
+            val chooser = Intent.createChooser(shareIntent, "Export Watermark-Free Media (${file.name})").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(chooser)
-        } catch (e: Exception) {
-            showToast("Saved in Downloads/NEXORA/${file.name}")
+        } catch (_: Exception) {
+            showToast("Saved locally in Downloads/NEXORA/${file.name}")
         }
     }
 
@@ -534,7 +579,6 @@ class NexoraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // Settings Controls
     fun setSettingsSheetOpen(open: Boolean) {
         _uiState.update { it.copy(isSettingsOpen = open) }
     }

@@ -901,7 +901,7 @@ private fun FinalDownloadConfirmationCard(
                         )
 
                         Text(
-                            text = "${formatBytes(job.bytesProcessed)} / ${formatBytes(job.totalBytes)} • Job ID: ${job.jobId}",
+                            text = "${formatBytes(job.bytesProcessed)} / ${formatBytes(job.totalBytes)} • GET /api/download/status/${job.jobId}",
                             style = MaterialTheme.typography.labelSmall,
                             color = NexoraMutedBlueGray
                         )

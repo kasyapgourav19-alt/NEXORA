@@ -48,6 +48,7 @@ import com.example.ui.components.NexoraArchitectureBottomSheet
 import com.example.ui.components.NexoraCreatorFooter
 import com.example.ui.components.NexoraDownloadCenterSection
 import com.example.ui.components.NexoraHeroWorkspaceSection
+import com.example.ui.components.NexoraMediaPlayerDialog
 import com.example.ui.components.NexoraRecentDownloadsSection
 import com.example.ui.components.NexoraSettingsBottomSheet
 import com.example.ui.components.NexoraTopHeader
@@ -251,6 +252,17 @@ fun NexoraAppScreen(
             onUpdateBackendUrl = viewModel::onSetCustomBackendUrl,
             onRunHealthCheck = viewModel::runHealthCheck,
             onDismiss = { viewModel.setArchitectureSheetOpen(false) }
+        )
+    }
+
+    // Built-In Watermark-Free Media Player & File Inspector Dialog
+    uiState.inspectedMediaFile?.let { inspected ->
+        NexoraMediaPlayerDialog(
+            mediaFile = inspected,
+            onShareExternal = {
+                viewModel.shareFileExternally(context, inspected.filePath, inspected.containerFormat)
+            },
+            onDismiss = viewModel::onDismissMediaInspector
         )
     }
 }
