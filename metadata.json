@@ -1,0 +1,6 @@
+{
+  "name": "NEXORA",
+  "description": "Ultimate Universal Media Downloader and Watermark-Free Media Workstation with a futuristic JARVIS-inspired AMOLED interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

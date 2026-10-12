@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">NEXORA</string>
+    <string name="tagline">Your Media. Your Quality.</string>
+    <string name="hero_subtitle">One workspace for your authorized video and audio downloads.</string>
+    <string name="status_media_engine">MEDIA ENGINE</string>
+    <string name="input_placeholder">Paste your video or media link here...</string>
+    <string name="btn_paste">Paste</string>
+    <string name="btn_clear">Clear</string>
+    <string name="btn_analyze">Analyze</string>
+    <string name="btn_download_video">Download Video</string>
+    <string name="btn_download_audio">Download Audio</string>
+    <string name="tab_video">VIDEO</string>
+    <string name="tab_audio">AUDIO</string>
+    <string name="creator_branding">Designed &amp; Built by Gaurav</string>
+    <string name="creator_ig_1">@avkaxofficial</string>
+    <string name="creator_ig_2">@gxr.avka</string>
+    <string name="watermark_free_badge">WATERMARK-FREE ENGINE • ZERO ADDED BRANDING</string>
+    <string name="audio_bitrate_notice">Note: Converting lower-bitrate source audio to a higher target bitrate does not restore missing high-frequency audio detail.</string>
+    <string name="provider_disclaimer">Provider support depends on official API capabilities, source permissions, and authorized integrations. DRM-protected or private streams are never bypassed.</string>
+</resources>
